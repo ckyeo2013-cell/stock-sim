@@ -5,12 +5,13 @@ canvas.width = 900;
 canvas.height = 500;
 
 /* =========================
-   PLAYER STATE
+   PERSISTENT STATE
 ========================= */
 
 let state = {
   cash: 5000,
-  shares: 0
+  shares: 0,
+  lastTime: Date.now()
 };
 
 /* =========================
@@ -52,7 +53,52 @@ function roundUp(n, step){
 }
 
 /* =========================
-   MARKET ENGINE (STRONGER MOVES)
+   SAVE / LOAD (PERSISTENCE)
+========================= */
+
+function saveMarket(){
+
+  let data = {
+    state,
+    price,
+    candles,
+    buyers,
+    sellers,
+    sentiment,
+    volatility,
+    trend,
+    lastTime: Date.now()
+  };
+
+  localStorage.setItem("marketSave", JSON.stringify(data));
+}
+
+function loadMarket(){
+
+  let data = localStorage.getItem("marketSave");
+  if(!data) return;
+
+  data = JSON.parse(data);
+
+  let timeGap = (Date.now() - data.lastTime) / 500;
+
+  state = data.state;
+  price = data.price;
+  candles = data.candles || [];
+  buyers = data.buyers;
+  sellers = data.sellers;
+  sentiment = data.sentiment;
+  volatility = data.volatility;
+  trend = data.trend;
+
+  /* FAST FORWARD MARKET WHEN CLOSED */
+  for(let i=0;i<Math.min(timeGap, 200);i++){
+    simulateTick();
+  }
+}
+
+/* =========================
+   MARKET ENGINE (REAL FLOW)
 ========================= */
 
 function updatePrice(){
@@ -66,13 +112,9 @@ function updatePrice(){
   volatility += randn()*0.002;
   volatility = Math.max(0.01, Math.min(0.05, volatility));
 
-  /* STRONGER REALISTIC MARKET FLOW */
   let momentum = trend * 1.2;
-
   let equilibrium = (500 - price) * 0.00002;
-
   let flow = (buyers - sellers) / 500;
-
   let noise = randn() * volatility * 2;
 
   let change =
@@ -83,19 +125,16 @@ function updatePrice(){
 
   price *= Math.exp(change);
 
-  if(price < 1){
-    price = 1;
-  }
+  if(price < 1) price = 1;
 
   trend = change;
 
-  /* volatility reacts to movement */
   volatility += Math.abs(change) * 0.001;
   volatility *= 0.99;
 }
 
 /* =========================
-   CANDLE ENGINE
+   CANDLE SYSTEM
 ========================= */
 
 function createCandle(){
@@ -107,14 +146,14 @@ function createCandle(){
   let close = price;
 
   let body = Math.abs(close - open);
-  let wickSize = Math.max(0.2, body * 1.5);
+  let wick = Math.max(0.2, body * 1.5);
 
-  let high = Math.max(open, close) + Math.random() * wickSize;
-  let low = Math.min(open, close) - Math.random() * wickSize;
+  let high = Math.max(open, close) + Math.random() * wick;
+  let low = Math.min(open, close) - Math.random() * wick;
 
   candles.push({ open, close, high, low });
 
-  if(candles.length > 120){
+  if(candles.length > 200){
     candles.shift();
   }
 
@@ -126,46 +165,77 @@ function createCandle(){
 }
 
 /* =========================
-   DRAW CHART
+   SIMULATION CORE
+========================= */
+
+function simulateTick(){
+  createCandle();
+}
+
+/* =========================
+   DRAW (10 ZONE COLUMN VIEW)
 ========================= */
 
 function draw(){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  let data = candles.slice(-80);
+  let data = candles.slice(-100);
 
-  if(data.length < 2) return;
+  if(data.length < 10) return;
+
+  /* =========================
+     DIVIDE INTO 10 SECTIONS
+  ========================= */
+
+  let sections = 10;
+  let chunkSize = Math.floor(data.length / sections);
+
+  let sectionData = [];
+
+  for(let i=0;i<sections;i++){
+    sectionData.push(
+      data.slice(i*chunkSize, (i+1)*chunkSize)
+    );
+  }
 
   let rawMin = Math.min(...data.map(c => c.low));
   let rawMax = Math.max(...data.map(c => c.high));
 
   let step = 50;
-
   if(rawMax - rawMin < 200) step = 20;
   if(rawMax - rawMin < 100) step = 10;
 
-  let min = roundDown(rawMin, step);
-  let max = roundUp(rawMax, step);
-
   function y(p){
-    return canvas.height - ((p - min) / (max - min)) * canvas.height;
+    return canvas.height - ((p - rawMin) / (rawMax - rawMin)) * canvas.height;
   }
 
-  let spacing = canvas.width / data.length;
-  let width = Math.max(2, spacing * 0.5);
+  /* =========================
+     GRID LINES (COLUMNS)
+  ========================= */
+
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  for(let i=0;i<sections;i++){
+
+    let x = (canvas.width / sections) * i;
+
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
 
   /* =========================
-     PRICE GRID LINES (FIXED)
+     PRICE LEVEL GRID
   ========================= */
 
   ctx.fillStyle = "#aaa";
   ctx.font = "12px Arial";
 
-  for(let val = min; val <= max; val += step){
+  for(let val = roundDown(rawMin, step); val <= rawMax; val += step){
 
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.beginPath();
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.moveTo(0, y(val));
     ctx.lineTo(canvas.width, y(val));
     ctx.stroke();
@@ -174,22 +244,19 @@ function draw(){
   }
 
   /* =========================
-     PRICE LINE
+     CANDLES (FILTER SMALL NOISE)
   ========================= */
 
-  ctx.strokeStyle = "#4aa3ff";
-  ctx.beginPath();
-  ctx.moveTo(0, y(price));
-  ctx.lineTo(canvas.width, y(price));
-  ctx.stroke();
-
-  /* =========================
-     CANDLES
-  ========================= */
+  let spacing = canvas.width / data.length;
+  let width = Math.max(2, spacing * 0.6);
 
   for(let i=0;i<data.length;i++){
 
     let c = data[i];
+
+    /* REMOVE MICRO CANDLES AT BOTTOM */
+    if(c.high < rawMin + (rawMax - rawMin)*0.05) continue;
+
     let x = i * spacing;
 
     let color = c.close >= c.open ? "#00c875" : "#ff4d4d";
@@ -211,33 +278,6 @@ function draw(){
       Math.max(1, Math.abs(y(c.open) - y(c.close)))
     );
   }
-
-  /* =========================
-     MOVING AVERAGES
-  ========================= */
-
-  function drawMA(arr, color){
-
-    ctx.strokeStyle = color;
-    ctx.beginPath();
-
-    for(let i=1;i<arr.length;i++){
-
-      let x1 = (i-1) * (canvas.width / arr.length);
-      let x2 = i * (canvas.width / arr.length);
-
-      let y1 = y(arr[i-1]);
-      let y2 = y(arr[i]);
-
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-    }
-
-    ctx.stroke();
-  }
-
-  drawMA(fastMA, "yellow");
-  drawMA(slowMA, "white");
 }
 
 /* =========================
@@ -246,7 +286,7 @@ function draw(){
 
 function updateUI(){
 
-  const el = (id,val)=>{
+  let el = (id,val)=>{
     let e = document.getElementById(id);
     if(e) e.innerText = val;
   };
@@ -260,8 +300,7 @@ function updateUI(){
   if(explain){
 
     let direction =
-      trend > 0.01 ? "Strong Uptrend"
-      : trend > 0 ? "Uptrend"
+      trend > 0.01 ? "Uptrend"
       : trend < -0.01 ? "Downtrend"
       : "Sideways";
 
@@ -271,7 +310,7 @@ function updateUI(){
 
     let condition =
       volatility > 0.03 ? "High volatility"
-      : "Stable market";
+      : "Stable";
 
     explain.innerHTML = `
       Cash: ${state.cash.toFixed(2)}<br>
@@ -280,17 +319,16 @@ function updateUI(){
       Direction: ${direction}<br>
       Pressure: ${pressure}<br>
       Condition: ${condition}<br>
-      Volatility: ${volatility.toFixed(3)}<br>
+      Volatility: ${volatility.toFixed(3)}
     `;
   }
 }
 
 /* =========================
-   TRADING SYSTEM
+   TRADING
 ========================= */
 
 function buy(){
-
   if(state.cash >= price){
     state.cash -= price;
     state.shares++;
@@ -298,7 +336,6 @@ function buy(){
 }
 
 function sell(){
-
   if(state.shares > 0){
     state.cash += price;
     state.shares--;
@@ -306,13 +343,15 @@ function sell(){
 }
 
 /* =========================
-   LOOP
+   MAIN LOOP
 ========================= */
 
 function tick(){
-  createCandle();
+  simulateTick();
   draw();
   updateUI();
+  saveMarket();
 }
 
+loadMarket();
 setInterval(tick, 500);

@@ -5,7 +5,7 @@ canvas.width = 900;
 canvas.height = 500;
 
 /* =========================
-   STATE
+   PLAYER STATE
 ========================= */
 
 let state = {
@@ -58,25 +58,17 @@ function updateMarketMode(){
 
     let r = Math.random();
 
-    if(r < 0.2){
-      marketMode = "bull";
-    }
-    else if(r < 0.4){
-      marketMode = "bear";
-    }
-    else if(r < 0.5){
-      marketMode = "panic";
-    }
-    else{
-      marketMode = "normal";
-    }
+    if(r < 0.2) marketMode = "bull";
+    else if(r < 0.4) marketMode = "bear";
+    else if(r < 0.5) marketMode = "panic";
+    else marketMode = "normal";
 
     modeTimer = 30 + Math.random()*50;
   }
 }
 
 /* =========================
-   PRICE ENGINE (STABLE)
+   PRICE ENGINE
 ========================= */
 
 function updatePrice(){
@@ -93,19 +85,20 @@ function updatePrice(){
     movement * 2000000 +
     Math.random()*5000;
 
-  /* volatility (SAFE) */
   volatility =
-    0.015 +
-    Math.abs(trend) * 0.4;
+    Math.max(
+      0.01,
+      Math.min(
+        0.06,
+        0.02 + Math.abs(trend) * 0.5
+      )
+    );
 
-  volatility = Math.min(volatility, 0.06);
-
-  /* regime drift */
   let regime = 0;
 
   if(marketMode === "bull") regime = 0.01;
   if(marketMode === "bear") regime = -0.01;
-  if(marketMode === "panic") regime = -0.025;
+  if(marketMode === "panic") regime = -0.02;
 
   let flow =
     (buyers - sellers) / 400;
@@ -122,27 +115,24 @@ function updatePrice(){
     noise +
     regime;
 
-  /* SAFE LIMIT */
   change = Math.max(-0.06, Math.min(0.06, change));
 
   price *= (1 + change);
 
-  /* HARD SAFETY FLOOR */
   price = Math.max(5, Math.min(5000, price));
 
-  /* TREND (SMOOTHED + FIXED) */
   let rawTrend =
     (price - prevPrice) / prevPrice;
 
   trend =
-    trend * 0.65 +
-    rawTrend * 0.35;
+    trend * 0.6 +
+    rawTrend * 0.4;
 
   prevPrice = price;
 }
 
 /* =========================
-   CANDLE SYSTEM
+   CANDLES
 ========================= */
 
 function createCandle(){
@@ -153,13 +143,12 @@ function createCandle(){
 
   let close = price;
 
-  let body =
-    Math.abs(close - open);
+  let body = Math.abs(close - open);
 
   let wick =
     Math.min(
-      2.5,
-      Math.max(0.4, body * 0.8)
+      2,
+      Math.max(0.3, body * 0.8)
     );
 
   let high =
@@ -174,8 +163,7 @@ function createCandle(){
     open,
     close,
     high,
-    low,
-    volume
+    low
   });
 
   if(candles.length > 300){
@@ -184,14 +172,14 @@ function createCandle(){
 }
 
 /* =========================
-   DRAW CHART (FIXED GRID + NO SPAM)
+   DRAW (COMPACT FIXED)
 ========================= */
 
 function draw(){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  const maxVisible = 60;
+  const maxVisible = 25; // COMPACT FIX
 
   let data = candles.slice(-maxVisible);
 
@@ -200,7 +188,6 @@ function draw(){
   let rawMin = Math.min(...data.map(c => c.low));
   let rawMax = Math.max(...data.map(c => c.high));
 
-  /* SAFE PADDING */
   let padding = (rawMax - rawMin) * 0.15;
 
   rawMin -= padding;
@@ -217,22 +204,14 @@ function draw(){
     return canvas.height - ((p - rawMin) / range) * canvas.height;
   }
 
-  /* CLEAN GRID STEP (FIXED) */
   let step = Math.ceil(range / 8);
+  if(step < 5) step = 5;
 
-  if(step <= 5) step = 5;
-  else if(step <= 10) step = 10;
-  else if(step <= 20) step = 20;
-  else if(step <= 50) step = 50;
-  else step = 100;
-
-  /* SPACING (NO WAVES) */
   let spacing = canvas.width / maxVisible;
-  let width = Math.max(2, spacing * 0.3);
+  let width = Math.max(2, spacing * 0.35);
 
-  /* GRID VERTICAL */
+  /* GRID */
   for(let i=0;i<10;i++){
-
     let x = (canvas.width/10)*i;
 
     ctx.beginPath();
@@ -242,52 +221,48 @@ function draw(){
     ctx.stroke();
   }
 
-  /* GRID HORIZONTAL */
+  /* PRICE LINES */
   ctx.fillStyle = "#aaa";
   ctx.font = "12px Arial";
 
-  let start = Math.floor(rawMin / step) * step;
+  let start = Math.floor(rawMin/step)*step;
 
-  for(let val = start; val <= rawMax; val += step){
+  for(let val=start; val<=rawMax; val+=step){
 
     ctx.beginPath();
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.moveTo(0, y(val));
-    ctx.lineTo(canvas.width, y(val));
+    ctx.moveTo(0,y(val));
+    ctx.lineTo(canvas.width,y(val));
     ctx.stroke();
 
-    ctx.fillText(val.toFixed(0), 5, y(val));
+    ctx.fillText(val.toFixed(0),5,y(val));
   }
 
   /* PRICE LINE */
   ctx.beginPath();
   ctx.strokeStyle = "#4aa3ff";
   ctx.lineWidth = 2;
-  ctx.moveTo(0, y(price));
-  ctx.lineTo(canvas.width, y(price));
+  ctx.moveTo(0,y(price));
+  ctx.lineTo(canvas.width,y(price));
   ctx.stroke();
 
   /* CANDLES */
   for(let i=0;i<data.length;i++){
 
     let c = data[i];
-
     let x = i * spacing;
 
     let color =
-      c.close >= c.open
-      ? "#00c875"
-      : "#ff4d4d";
+      c.close >= c.open ? "#00c875" : "#ff4d4d";
 
-    /* wick */
-    ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.moveTo(x, y(c.high));
-    ctx.lineTo(x, y(c.low));
+
+    ctx.beginPath();
+    ctx.moveTo(x,y(c.high));
+    ctx.lineTo(x,y(c.low));
     ctx.stroke();
 
-    /* body */
     ctx.fillStyle = color;
 
     let bodyHeight =
@@ -295,7 +270,7 @@ function draw(){
 
     ctx.fillRect(
       x - width/2,
-      y(Math.max(c.open, c.close)),
+      y(Math.max(c.open,c.close)),
       width,
       bodyHeight
     );
@@ -303,54 +278,42 @@ function draw(){
 }
 
 /* =========================
-   ANALYSIS PANEL (FULL RESTORED)
+   ANALYSIS + TREND FIXED UI
 ========================= */
 
 function getAnalysis(){
 
   let direction =
-    trend > 0.02
-    ? "Strong bullish momentum"
-    : trend > 0.005
-    ? "Bullish trend"
-    : trend < -0.02
-    ? "Strong bearish momentum"
-    : trend < -0.005
-    ? "Bearish trend"
-    : "Sideways market";
+    trend > 0.02 ? "Strong bullish"
+    : trend > 0.005 ? "Bullish"
+    : trend < -0.02 ? "Strong bearish"
+    : trend < -0.005 ? "Bearish"
+    : "Sideways";
 
   let volState =
-    volatility > 0.04
-    ? "High volatility"
-    : volatility > 0.02
-    ? "Moderate volatility"
+    volatility > 0.04 ? "High volatility"
+    : volatility > 0.02 ? "Moderate volatility"
     : "Low volatility";
 
   let flow =
-    buyers > sellers
-    ? "Buy pressure"
-    : "Sell pressure";
+    buyers > sellers ? "Buy pressure" : "Sell pressure";
 
   let structure =
-    price > 550
-    ? "Overbought zone"
-    : price < 450
-    ? "Oversold zone"
-    : "Balanced zone";
+    price > 550 ? "Overbought"
+    : price < 450 ? "Oversold"
+    : "Balanced";
 
-  return `
-    Trend: ${direction}<br>
-    Volatility: ${volState}<br>
-    Flow: ${flow}<br>
-    Structure: ${structure}<br><br>
-
-    Market Mode: ${marketMode}<br>
-    Volume: ${Math.floor(volume)}
-  `;
+  return {
+    direction,
+    volState,
+    flow,
+    structure,
+    summary: `${direction}, ${flow}, ${volState}, ${structure}`
+  };
 }
 
 /* =========================
-   UI
+   UI (FIXED TREND POSITION)
 ========================= */
 
 function updateUI(){
@@ -364,16 +327,33 @@ function updateUI(){
   set("buyers", buyers.toFixed(0));
   set("sellers", sellers.toFixed(0));
   set("volume", Math.floor(volume));
-  set("trend", trend.toFixed(4));
+
+  /* TREND FIXED (NOW PROPER AREA) */
+  set(
+    "trend",
+    trend.toFixed(4)
+  );
 
   let explain = document.getElementById("explain");
 
   if(explain){
+
+    let a = getAnalysis();
+
     explain.innerHTML = `
       Cash: ${state.cash.toFixed(2)}<br>
       Shares: ${state.shares}<br><br>
 
-      ${getAnalysis()}
+      Trend: ${a.direction}<br>
+      Volatility: ${a.volState}<br>
+      Flow: ${a.flow}<br>
+      Structure: ${a.structure}<br><br>
+
+      Market Mode: ${marketMode}<br>
+      Volume: ${Math.floor(volume)}<br><br>
+
+      Summary:<br>
+      ${a.summary}
     `;
   }
 }

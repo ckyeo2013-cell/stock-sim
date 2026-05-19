@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Market Simulator Pro</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+
+  <!-- CHART -->
+  <div class="left">
+
+    <canvas id="chart"></canvas>
+
+    <div class="stats">
+
+      <div class="box"><h3>PRICE</h3><p id="price"></p></div>
+      <div class="box"><h3>VOLUME</h3><p id="volume"></p></div>
+      <div class="box"><h3>BUYERS</h3><p id="buyers"></p></div>
+      <div class="box"><h3>SELLERS</h3><p id="sellers"></p></div>
+      <div class="box"><h3>TREND</h3><p id="trend"></p></div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right">
+
+    <h2>Market Analysis</h2>
+
+    <div id="explain"></div>
+
+    <div class="controls">
+      <button onclick="buy()">BUY</button>
+      <button onclick="sell()">SELL</button>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="stock.js"></script>
+</body>
+</html>

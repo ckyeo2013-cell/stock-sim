@@ -52,7 +52,7 @@ function roundUp(n, step){
 }
 
 /* =========================
-   MARKET FLOW ENGINE
+   MARKET ENGINE (STRONGER MOVES)
 ========================= */
 
 function updatePrice(){
@@ -66,20 +66,20 @@ function updatePrice(){
   volatility += randn()*0.002;
   volatility = Math.max(0.01, Math.min(0.05, volatility));
 
-  /* momentum */
-  let momentum = trend * 0.6;
+  /* STRONGER REALISTIC MARKET FLOW */
+  let momentum = trend * 1.2;
 
-  /* mean reversion to 500 */
-  let equilibrium = (500 - price) * 0.00001;
+  let equilibrium = (500 - price) * 0.00002;
 
-  /* buyer/seller flow */
-  let flow = (buyers - sellers) / 1000;
+  let flow = (buyers - sellers) / 500;
 
-  /* noise */
-  let noise = randn() * volatility;
+  let noise = randn() * volatility * 2;
 
-  /* final movement */
-  let change = momentum + equilibrium + flow + noise;
+  let change =
+    momentum +
+    equilibrium +
+    flow +
+    noise;
 
   price *= Math.exp(change);
 
@@ -89,13 +89,13 @@ function updatePrice(){
 
   trend = change;
 
-  /* volatility adapts naturally */
+  /* volatility reacts to movement */
   volatility += Math.abs(change) * 0.001;
   volatility *= 0.99;
 }
 
 /* =========================
-   CANDLES (REALISTIC WICKS)
+   CANDLE ENGINE
 ========================= */
 
 function createCandle(){
@@ -156,13 +156,20 @@ function draw(){
   let width = Math.max(2, spacing * 0.5);
 
   /* =========================
-     PRICE SCALE
+     PRICE GRID LINES (FIXED)
   ========================= */
 
   ctx.fillStyle = "#aaa";
   ctx.font = "12px Arial";
 
   for(let val = min; val <= max; val += step){
+
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.beginPath();
+    ctx.moveTo(0, y(val));
+    ctx.lineTo(canvas.width, y(val));
+    ctx.stroke();
+
     ctx.fillText(val.toFixed(0), 5, y(val));
   }
 

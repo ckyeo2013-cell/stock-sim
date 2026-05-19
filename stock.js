@@ -9,7 +9,7 @@ canvas.height = 500;
 ========================= */
 
 let state = {
-  cash: 10000,
+  cash: 5000,
   shares: 0
 };
 
@@ -17,7 +17,7 @@ let state = {
    MARKET STATE
 ========================= */
 
-let price = 100;
+let price = 500;
 let candles = [];
 
 let buyers = 50;
@@ -27,13 +27,6 @@ let sentiment = 0.5;
 let volatility = 0.02;
 
 let trend = 0;
-
-/* =========================
-   CRASH SYSTEM
-========================= */
-
-let crash = 0;
-let crashCooldown = 0;
 
 /* =========================
    MOVING AVERAGES
@@ -59,36 +52,10 @@ function roundUp(n, step){
 }
 
 /* =========================
-   NEWS + CRASH ENGINE
+   MARKET FLOW ENGINE
 ========================= */
 
-function updateNews(){
-
-  if(crashCooldown > 0) crashCooldown--;
-
-  if(crash === 0 && crashCooldown === 0){
-    if(Math.random() < 0.006){
-      crash = -1;
-      crashCooldown = 40;
-    }
-  }
-
-  if(crash !== 0){
-
-    volatility += 0.003;
-    sentiment -= 0.008;
-
-    if(Math.random() < 0.02){
-      crash = 0;
-    }
-  }
-}
-
-/* =========================
-   MARKET BEHAVIOR
-========================= */
-
-function updateMarket(){
+function updatePrice(){
 
   buyers = 30 + Math.random()*70;
   sellers = 30 + Math.random()*70;
@@ -99,48 +66,36 @@ function updateMarket(){
   volatility += randn()*0.002;
   volatility = Math.max(0.01, Math.min(0.05, volatility));
 
-  if(crash === 0){
-    sentiment += (0.5 - sentiment) * 0.02;
-    volatility *= 0.995;
-  }
-}
+  /* momentum */
+  let momentum = trend * 0.6;
 
-/* =========================
-   PRICE ENGINE
-========================= */
+  /* mean reversion to 500 */
+  let equilibrium = (500 - price) * 0.00001;
 
-function updatePrice(){
+  /* buyer/seller flow */
+  let flow = (buyers - sellers) / 1000;
 
-  updateNews();
-  updateMarket();
+  /* noise */
+  let noise = randn() * volatility;
 
-  let imbalance = (buyers - sellers) / 100;
-  let drift = (sentiment - 0.5) * 0.02;
-
-  let shock = randn() * volatility;
-
-  if(crash === -1){
-    shock -= 0.03;
-  }
-
-  let bias = 0.0003;
-
-  let change = drift + imbalance*0.01 + shock + bias;
+  /* final movement */
+  let change = momentum + equilibrium + flow + noise;
 
   price *= Math.exp(change);
 
   if(price < 1){
     price = 1;
-    crash = 0;
-    sentiment = 0.5;
-    volatility = 0.02;
   }
 
   trend = change;
+
+  /* volatility adapts naturally */
+  volatility += Math.abs(change) * 0.001;
+  volatility *= 0.99;
 }
 
 /* =========================
-   CANDLE SYSTEM (FIXED WICKS)
+   CANDLES (REALISTIC WICKS)
 ========================= */
 
 function createCandle(){
@@ -152,10 +107,7 @@ function createCandle(){
   let close = price;
 
   let body = Math.abs(close - open);
-  let uncertainty = volatility * 8;
-
-  let wickSize = (uncertainty * 0.6) + (1 / (body + 0.5)) * 0.8;
-  wickSize = Math.min(wickSize, 1.5);
+  let wickSize = Math.max(0.2, body * 1.5);
 
   let high = Math.max(open, close) + Math.random() * wickSize;
   let low = Math.min(open, close) - Math.random() * wickSize;
@@ -174,54 +126,6 @@ function createCandle(){
 }
 
 /* =========================
-   ANALYST ENGINE
-========================= */
-
-function getMarketAnalysis(){
-
-  let direction =
-    trend > 0.01 ? "strong upward trend"
-    : trend > 0 ? "weak upward trend"
-    : trend < -0.01 ? "strong downward trend"
-    : "sideways movement";
-
-  let pressure =
-    buyers > sellers ? "buyers are in control"
-    : "sellers are dominating";
-
-  let volatilityState =
-    volatility > 0.03 ? "high volatility"
-    : "stable conditions";
-
-  let crashState =
-    crash !== 0 ? "panic / crash behavior"
-    : "normal market conditions";
-
-  let explanation = "";
-
-  if(trend > 0.02){
-    explanation = "Strong buying momentum is pushing price upward.";
-  }
-  else if(trend < -0.02){
-    explanation = "Heavy selling pressure is pushing price downward.";
-  }
-  else if(volatility > 0.03){
-    explanation = "Market is unstable with unpredictable movement.";
-  }
-  else{
-    explanation = "Market is consolidating with no strong direction.";
-  }
-
-  return {
-    direction,
-    pressure,
-    volatilityState,
-    crashState,
-    explanation
-  };
-}
-
-/* =========================
    DRAW CHART
 ========================= */
 
@@ -236,10 +140,10 @@ function draw(){
   let rawMin = Math.min(...data.map(c => c.low));
   let rawMax = Math.max(...data.map(c => c.high));
 
-  let step = 10;
+  let step = 50;
 
-  if(rawMax - rawMin > 200) step = 50;
-  else if(rawMax - rawMin > 80) step = 20;
+  if(rawMax - rawMin < 200) step = 20;
+  if(rawMax - rawMin < 100) step = 10;
 
   let min = roundDown(rawMin, step);
   let max = roundUp(rawMax, step);
@@ -348,18 +252,28 @@ function updateUI(){
 
   if(explain){
 
-    let a = getMarketAnalysis();
+    let direction =
+      trend > 0.01 ? "Strong Uptrend"
+      : trend > 0 ? "Uptrend"
+      : trend < -0.01 ? "Downtrend"
+      : "Sideways";
+
+    let pressure =
+      buyers > sellers ? "Buy pressure"
+      : "Sell pressure";
+
+    let condition =
+      volatility > 0.03 ? "High volatility"
+      : "Stable market";
 
     explain.innerHTML = `
       Cash: ${state.cash.toFixed(2)}<br>
       Shares: ${state.shares}<br><br>
 
-      Direction: ${a.direction}<br>
-      Pressure: ${a.pressure}<br>
-      Volatility: ${a.volatilityState}<br>
-      State: ${a.crashState}<br><br>
-
-      Analyst: ${a.explanation}
+      Direction: ${direction}<br>
+      Pressure: ${pressure}<br>
+      Condition: ${condition}<br>
+      Volatility: ${volatility.toFixed(3)}<br>
     `;
   }
 }

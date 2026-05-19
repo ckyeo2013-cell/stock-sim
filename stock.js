@@ -29,8 +29,10 @@ let sentiment = 0.5;
 let volatility = 0.02;
 let trend = 0;
 
+let prevPrice = price;
+
 /* =========================
-   SAFE RANDOM
+   UTILS
 ========================= */
 
 function randn(){
@@ -38,7 +40,7 @@ function randn(){
 }
 
 /* =========================
-   SAFE PRICE ENGINE
+   PRICE ENGINE (BALANCED + ACTIVE)
 ========================= */
 
 function updatePrice(){
@@ -51,11 +53,14 @@ function updatePrice(){
   sentiment += randn()*0.005;
   sentiment = Math.max(0, Math.min(1, sentiment));
 
-  volatility = 0.015 + Math.abs(trend) * 0.25;
+  volatility = 0.02 + Math.abs(trend) * 0.6;
 
-  let momentum = trend * 0.9;
-  let equilibrium = (500 - price) * 0.00001;
+  let momentum = trend * 0.7;
+
+  let equilibrium = (500 - price) * 0.000005;
+
   let flow = (buyers - sellers) / 800;
+
   let noise = randn() * volatility;
 
   let change =
@@ -64,18 +69,26 @@ function updatePrice(){
     flow +
     noise;
 
-  /* HARD LIMITS (PREVENT BREAKING) */
-  change = Math.max(-0.04, Math.min(0.04, change));
+  /* allow real movement but prevent explosions */
+  change = Math.max(-0.08, Math.min(0.08, change));
 
   price *= (1 + change);
 
   price = Math.max(5, Math.min(5000, price));
 
-  trend = change;
+  /* =========================
+     TREND (FIXED + RESPONSIVE)
+  ========================= */
+
+  let rawTrend = (price - prevPrice) / prevPrice;
+
+  trend = trend * 0.6 + rawTrend * 0.4;
+
+  prevPrice = price;
 }
 
 /* =========================
-   CANDLE SYSTEM
+   CANDLE CREATION
 ========================= */
 
 function createCandle(){
@@ -88,13 +101,12 @@ function createCandle(){
 
   let body = Math.abs(close - open);
 
-  /* SAFE WICK (NO EXTREME SPIKES) */
-  let wick = Math.min(2, Math.max(0.3, body * 0.8));
+  let wick = Math.min(2, Math.max(0.3, body * 0.9));
 
   let high = Math.max(open, close) + Math.random() * wick;
   let low = Math.min(open, close) - Math.random() * wick;
 
-  candles.push({ open, close, high, low });
+  candles.push({ open, close, high, low, volume });
 
   if(candles.length > 300){
     candles.shift();
@@ -102,14 +114,13 @@ function createCandle(){
 }
 
 /* =========================
-   DRAW (FIXED OVERLAP ISSUE)
+   DRAW ENGINE (FIXED LAYERS)
 ========================= */
 
 function draw(){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  /* LIMIT VISIBLE CANDLES (CRITICAL FIX) */
   const maxVisible = 60;
   let data = candles.slice(-maxVisible);
 
@@ -131,35 +142,30 @@ function draw(){
     return canvas.height - ((p - rawMin) / range) * canvas.height;
   }
 
-  /* FIXED SPACING (NO MORE “SOUND WAVES”) */
   let spacing = canvas.width / maxVisible;
   let width = Math.max(2, spacing * 0.5);
 
   /* =========================
-     GRID (VERTICAL COLUMNS)
+     GRID (DRAW FIRST - ALWAYS BEHIND)
   ========================= */
+
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.font = "12px Arial";
+  ctx.fillStyle = "#aaa";
 
   for(let i=0;i<10;i++){
     let x = (canvas.width/10)*i;
 
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.beginPath();
     ctx.moveTo(x,0);
     ctx.lineTo(x,canvas.height);
     ctx.stroke();
   }
 
-  /* =========================
-     PRICE GRID LINES
-  ========================= */
+  for(let val = Math.floor(rawMin/step)*step; val <= rawMax; val += step){
 
-  ctx.fillStyle = "#aaa";
-  ctx.font = "12px Arial";
-
-  for(let val = Math.floor(rawMin / step) * step; val <= rawMax; val += step){
-
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.beginPath();
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.moveTo(0, y(val));
     ctx.lineTo(canvas.width, y(val));
     ctx.stroke();
@@ -168,17 +174,18 @@ function draw(){
   }
 
   /* =========================
-     PRICE LINE
+     PRICE LINE (ABOVE GRID, BELOW CANDLES)
   ========================= */
 
   ctx.strokeStyle = "#4aa3ff";
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, y(price));
   ctx.lineTo(canvas.width, y(price));
   ctx.stroke();
 
   /* =========================
-     CANDLES (NO OVERLAP FIX)
+     CANDLES (TOP LAYER ONLY)
   ========================= */
 
   for(let i=0;i<data.length;i++){
@@ -213,7 +220,7 @@ function draw(){
 }
 
 /* =========================
-   ANALYSIS PANEL (ALWAYS WORKS)
+   ANALYSIS PANEL (ALWAYS FULL)
 ========================= */
 
 function updateUI(){
@@ -233,15 +240,15 @@ function updateUI(){
   if(explain){
 
     let direction =
-      trend > 0.02 ? "Strong bullish"
+      trend > 0.02 ? "Strong bullish momentum"
       : trend > 0.005 ? "Mild bullish"
-      : trend < -0.02 ? "Strong bearish"
+      : trend < -0.02 ? "Strong bearish momentum"
       : trend < -0.005 ? "Mild bearish"
-      : "Sideways";
+      : "Sideways market";
 
     let volState =
-      volatility > 0.03 ? "High volatility"
-      : volatility > 0.015 ? "Moderate volatility"
+      volatility > 0.04 ? "High volatility"
+      : volatility > 0.02 ? "Moderate volatility"
       : "Low volatility";
 
     let flow =
@@ -249,16 +256,16 @@ function updateUI(){
       : "Sell pressure";
 
     let structure =
-      price > 550 ? "Overextended"
-      : price < 450 ? "Discount zone"
-      : "Balanced range";
+      price > 550 ? "Overbought zone"
+      : price < 450 ? "Oversold zone"
+      : "Balanced zone";
 
     explain.innerHTML = `
       Cash: ${state.cash.toFixed(2)}<br>
       Shares: ${state.shares}<br>
       Volume: ${Math.floor(volume)}<br><br>
 
-      Direction: ${direction}<br>
+      Trend: ${direction}<br>
       Volatility: ${volState}<br>
       Flow: ${flow}<br>
       Structure: ${structure}<br><br>

@@ -30,19 +30,15 @@ let volatility = 0.02;
 let trend = 0;
 
 /* =========================
-   UTILS
+   SAFE RANDOM
 ========================= */
 
 function randn(){
   return (Math.random()+Math.random()+Math.random()+Math.random()-2);
 }
 
-function roundDown(n, step){
-  return Math.floor(n / step) * step;
-}
-
 /* =========================
-   SAFE MARKET ENGINE (NO CRASH)
+   SAFE PRICE ENGINE
 ========================= */
 
 function updatePrice(){
@@ -55,14 +51,11 @@ function updatePrice(){
   sentiment += randn()*0.005;
   sentiment = Math.max(0, Math.min(1, sentiment));
 
-  volatility = 0.015 + Math.abs(trend) * 0.3;
+  volatility = 0.015 + Math.abs(trend) * 0.25;
 
   let momentum = trend * 0.9;
-
   let equilibrium = (500 - price) * 0.00001;
-
   let flow = (buyers - sellers) / 800;
-
   let noise = randn() * volatility;
 
   let change =
@@ -71,19 +64,18 @@ function updatePrice(){
     flow +
     noise;
 
-  /* HARD SAFETY LIMIT (prevents collapse to 1) */
-  change = Math.max(-0.05, Math.min(0.05, change));
+  /* HARD LIMITS (PREVENT BREAKING) */
+  change = Math.max(-0.04, Math.min(0.04, change));
 
-  price *= Math.exp(change);
+  price *= (1 + change);
 
-  if(price < 5) price = 5;
-  if(price > 5000) price = 5000;
+  price = Math.max(5, Math.min(5000, price));
 
   trend = change;
 }
 
 /* =========================
-   CANDLES (SAFE)
+   CANDLE SYSTEM
 ========================= */
 
 function createCandle(){
@@ -95,63 +87,31 @@ function createCandle(){
   let close = price;
 
   let body = Math.abs(close - open);
-  let wick = Math.max(0.5, body * 1.5);
+
+  /* SAFE WICK (NO EXTREME SPIKES) */
+  let wick = Math.min(2, Math.max(0.3, body * 0.8));
 
   let high = Math.max(open, close) + Math.random() * wick;
   let low = Math.min(open, close) - Math.random() * wick;
 
   candles.push({ open, close, high, low });
 
-  if(candles.length > 200){
+  if(candles.length > 300){
     candles.shift();
   }
 }
 
 /* =========================
-   ANALYSIS ENGINE (FIXED, NEVER EMPTY)
-========================= */
-
-function getMarketAnalysis(){
-
-  let direction =
-    trend > 0.02 ? "Strong bullish movement"
-    : trend > 0.005 ? "Mild bullish trend"
-    : trend < -0.02 ? "Strong bearish movement"
-    : trend < -0.005 ? "Mild bearish trend"
-    : "Sideways consolidation";
-
-  let volState =
-    volatility > 0.04 ? "High volatility"
-    : volatility > 0.02 ? "Moderate volatility"
-    : "Low volatility";
-
-  let flowState =
-    buyers > sellers ? "Buy pressure"
-    : "Sell pressure";
-
-  let structure =
-    price > 550 ? "Overbought zone"
-    : price < 450 ? "Oversold zone"
-    : "Balanced zone";
-
-  return {
-    direction,
-    volState,
-    flowState,
-    structure,
-    summary: `${direction}, ${volState}, ${flowState}, ${structure}.`
-  };
-}
-
-/* =========================
-   DRAW (STABLE GRID + 10 COLUMNS)
+   DRAW (FIXED OVERLAP ISSUE)
 ========================= */
 
 function draw(){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  let data = candles.slice(-100);
+  /* LIMIT VISIBLE CANDLES (CRITICAL FIX) */
+  const maxVisible = 60;
+  let data = candles.slice(-maxVisible);
 
   if(data.length < 10) return;
 
@@ -171,36 +131,35 @@ function draw(){
     return canvas.height - ((p - rawMin) / range) * canvas.height;
   }
 
-  let spacing = canvas.width / data.length;
+  /* FIXED SPACING (NO MORE “SOUND WAVES”) */
+  let spacing = canvas.width / maxVisible;
   let width = Math.max(2, spacing * 0.5);
 
   /* =========================
-     10 GRID COLUMNS
+     GRID (VERTICAL COLUMNS)
   ========================= */
 
   for(let i=0;i<10;i++){
     let x = (canvas.width/10)*i;
 
-    ctx.beginPath();
     ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.beginPath();
     ctx.moveTo(x,0);
     ctx.lineTo(x,canvas.height);
     ctx.stroke();
   }
 
   /* =========================
-     PRICE GRID (10/20/30 STYLE)
+     PRICE GRID LINES
   ========================= */
 
   ctx.fillStyle = "#aaa";
   ctx.font = "12px Arial";
 
-  let minGrid = roundDown(rawMin, step);
+  for(let val = Math.floor(rawMin / step) * step; val <= rawMax; val += step){
 
-  for(let val = minGrid; val <= rawMax; val += step){
-
-    ctx.beginPath();
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.beginPath();
     ctx.moveTo(0, y(val));
     ctx.lineTo(canvas.width, y(val));
     ctx.stroke();
@@ -219,7 +178,7 @@ function draw(){
   ctx.stroke();
 
   /* =========================
-     CANDLES
+     CANDLES (NO OVERLAP FIX)
   ========================= */
 
   for(let i=0;i<data.length;i++){
@@ -233,24 +192,28 @@ function draw(){
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
 
+    /* wick */
     ctx.beginPath();
     ctx.moveTo(x, y(c.high));
     ctx.lineTo(x, y(c.low));
     ctx.stroke();
 
+    /* body */
     ctx.fillStyle = color;
+
+    let bodyHeight = Math.max(1, Math.abs(y(c.open) - y(c.close)));
 
     ctx.fillRect(
       x - width/2,
       y(Math.max(c.open, c.close)),
       width,
-      Math.max(1, Math.abs(y(c.open) - c.close))
+      bodyHeight
     );
   }
 }
 
 /* =========================
-   UI (FULL ANALYSIS RESTORED)
+   ANALYSIS PANEL (ALWAYS WORKS)
 ========================= */
 
 function updateUI(){
@@ -269,20 +232,38 @@ function updateUI(){
 
   if(explain){
 
-    let a = getMarketAnalysis();
+    let direction =
+      trend > 0.02 ? "Strong bullish"
+      : trend > 0.005 ? "Mild bullish"
+      : trend < -0.02 ? "Strong bearish"
+      : trend < -0.005 ? "Mild bearish"
+      : "Sideways";
+
+    let volState =
+      volatility > 0.03 ? "High volatility"
+      : volatility > 0.015 ? "Moderate volatility"
+      : "Low volatility";
+
+    let flow =
+      buyers > sellers ? "Buy pressure"
+      : "Sell pressure";
+
+    let structure =
+      price > 550 ? "Overextended"
+      : price < 450 ? "Discount zone"
+      : "Balanced range";
 
     explain.innerHTML = `
       Cash: ${state.cash.toFixed(2)}<br>
       Shares: ${state.shares}<br>
       Volume: ${Math.floor(volume)}<br><br>
 
-      Direction: ${a.direction}<br>
-      Volatility: ${a.volState}<br>
-      Flow: ${a.flowState}<br>
-      Structure: ${a.structure}<br><br>
+      Direction: ${direction}<br>
+      Volatility: ${volState}<br>
+      Flow: ${flow}<br>
+      Structure: ${structure}<br><br>
 
-      Market Summary:<br>
-      ${a.summary}
+      Summary: ${direction}, ${volState}, ${flow}, ${structure}
     `;
   }
 }

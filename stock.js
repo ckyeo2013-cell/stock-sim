@@ -86,13 +86,10 @@ function updatePrice(){
     Math.random()*5000;
 
   volatility =
-    Math.max(
-      0.01,
-      Math.min(
-        0.06,
-        0.02 + Math.abs(trend) * 0.5
-      )
-    );
+    0.01 +
+    Math.abs(trend) * 0.5;
+
+  volatility = Math.min(volatility, 0.06);
 
   let regime = 0;
 
@@ -132,7 +129,7 @@ function updatePrice(){
 }
 
 /* =========================
-   CANDLES (FIXED COMPRESSION)
+   CANDLES (COMPACT FIXED)
 ========================= */
 
 function createCandle(){
@@ -146,15 +143,13 @@ function createCandle(){
   let body = Math.abs(close - open);
 
   let wick =
-    Math.min(1.5, Math.max(0.2, body * 0.6));
+    Math.min(1.2, Math.max(0.2, body * 0.6));
 
   let high =
-    Math.max(open, close) +
-    Math.random() * wick;
+    Math.max(open, close) + Math.random() * wick;
 
   let low =
-    Math.min(open, close) -
-    Math.random() * wick;
+    Math.min(open, close) - Math.random() * wick;
 
   candles.push({ open, close, high, low });
 
@@ -164,14 +159,14 @@ function createCandle(){
 }
 
 /* =========================
-   DRAW CHART (COMPACT + CLEAN)
+   DRAW (FIXED GRID + COMPACT)
 ========================= */
 
 function draw(){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  const maxVisible = 30; // COMPACT FIX
+  const maxVisible = 25; // compact
 
   let data = candles.slice(-maxVisible);
 
@@ -191,15 +186,27 @@ function draw(){
     return canvas.height - ((p - rawMin) / range) * canvas.height;
   }
 
-  let step = Math.ceil(range / 6);
-  if(step < 5) step = 5;
+  /* =========================
+     CLEAN 0 / 25 / 50 GRID FIX
+  ========================= */
 
-  let spacing = canvas.width / maxVisible;
+  let step = 25;
 
-  /* SUPER COMPACT CANDLES */
-  let width = Math.max(1.5, spacing * 0.22);
+  let stepTest = range / 6;
 
-  /* GRID */
+  if(stepTest > 200) step = 100;
+  else if(stepTest > 100) step = 50;
+  else if(stepTest > 50) step = 25;
+  else if(stepTest > 20) step = 10;
+  else step = 5;
+
+  let start = Math.floor(rawMin / step) * step;
+
+  /* spacing FIX */
+  let spacing = canvas.width / (maxVisible * 1.8);
+  let width = Math.max(1, spacing * 0.18);
+
+  /* GRID LINES */
   for(let i=0;i<10;i++){
     let x = (canvas.width/10)*i;
 
@@ -210,11 +217,9 @@ function draw(){
     ctx.stroke();
   }
 
-  /* PRICE LINES */
+  /* HORIZONTAL PRICE GRID */
   ctx.fillStyle = "#aaa";
   ctx.font = "12px Arial";
-
-  let start = Math.floor(rawMin/step)*step;
 
   for(let val=start; val<=rawMax; val+=step){
 
@@ -239,7 +244,6 @@ function draw(){
   for(let i=0;i<data.length;i++){
 
     let c = data[i];
-
     let x = i * spacing;
 
     let color =
@@ -305,7 +309,7 @@ function getAnalysis(){
 }
 
 /* =========================
-   UI (TREND MOVED TO BUY/SELL AREA)
+   UI (NO DUPLICATE TREND)
 ========================= */
 
 function updateUI(){
@@ -320,15 +324,13 @@ function updateUI(){
   set("sellers", sellers.toFixed(0));
   set("volume", Math.floor(volume));
 
-  /* TREND NOW ONLY IN UI (NOT ANALYSIS) */
-  set(
-    "trend",
-    trend > 0
-      ? "↗ Bullish"
-      : trend < 0
-      ? "↘ Bearish"
-      : "→ Neutral"
-  );
+  /* ONLY ONE TREND LOCATION */
+  let trendText =
+    trend > 0 ? "↗ Bullish"
+    : trend < 0 ? "↘ Bearish"
+    : "→ Neutral";
+
+  set("trend", trendText);
 
   let explain = document.getElementById("explain");
 
@@ -364,7 +366,7 @@ function sell(){
    INIT
 ========================= */
 
-for(let i=0;i<30;i++){
+for(let i=0;i<25;i++){
   createCandle();
 }
 

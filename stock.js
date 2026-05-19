@@ -5,7 +5,21 @@ canvas.width = 900;
 canvas.height = 500;
 
 /* =========================
-   PERSISTENT STATE
+   TIMEFRAME SYSTEM
+========================= */
+
+let timeframes = {
+  "1m": 1,
+  "5m": 5,
+  "1h": 60,
+  "24h": 1440
+};
+
+let currentTF = "1m";
+let tfMultiplier = timeframes[currentTF];
+
+/* =========================
+   PLAYER STATE
 ========================= */
 
 let state = {
@@ -24,9 +38,10 @@ let candles = [];
 let buyers = 50;
 let sellers = 50;
 
+let volume = 10000;
+
 let sentiment = 0.5;
 let volatility = 0.02;
-
 let trend = 0;
 
 /* =========================
@@ -53,52 +68,16 @@ function roundUp(n, step){
 }
 
 /* =========================
-   SAVE / LOAD (PERSISTENCE)
+   TIMEFRAME SWITCH
 ========================= */
 
-function saveMarket(){
-
-  let data = {
-    state,
-    price,
-    candles,
-    buyers,
-    sellers,
-    sentiment,
-    volatility,
-    trend,
-    lastTime: Date.now()
-  };
-
-  localStorage.setItem("marketSave", JSON.stringify(data));
-}
-
-function loadMarket(){
-
-  let data = localStorage.getItem("marketSave");
-  if(!data) return;
-
-  data = JSON.parse(data);
-
-  let timeGap = (Date.now() - data.lastTime) / 500;
-
-  state = data.state;
-  price = data.price;
-  candles = data.candles || [];
-  buyers = data.buyers;
-  sellers = data.sellers;
-  sentiment = data.sentiment;
-  volatility = data.volatility;
-  trend = data.trend;
-
-  /* FAST FORWARD MARKET WHEN CLOSED */
-  for(let i=0;i<Math.min(timeGap, 200);i++){
-    simulateTick();
-  }
+function setTimeframe(tf){
+  currentTF = tf;
+  tfMultiplier = timeframes[tf];
 }
 
 /* =========================
-   MARKET ENGINE (REAL FLOW)
+   MARKET ENGINE (FIXED FLOW)
 ========================= */
 
 function updatePrice(){
@@ -106,31 +85,35 @@ function updatePrice(){
   buyers = 30 + Math.random()*70;
   sellers = 30 + Math.random()*70;
 
+  volume = 5000 + Math.random()*20000 * tfMultiplier;
+
   sentiment += randn()*0.01;
   sentiment = Math.max(0, Math.min(1, sentiment));
 
-  volatility += randn()*0.002;
-  volatility = Math.max(0.01, Math.min(0.05, volatility));
+  volatility = 0.02 + (Math.abs(trend) * 0.5);
 
-  let momentum = trend * 1.2;
+  let momentum = trend * 1.3;
+
   let equilibrium = (500 - price) * 0.00002;
+
   let flow = (buyers - sellers) / 500;
-  let noise = randn() * volatility * 2;
+
+  let volImpact = (volume / 20000) * 0.01;
+
+  let noise = randn() * volatility * tfMultiplier * 0.5;
 
   let change =
     momentum +
     equilibrium +
     flow +
-    noise;
+    noise +
+    volImpact;
 
   price *= Math.exp(change);
 
   if(price < 1) price = 1;
 
   trend = change;
-
-  volatility += Math.abs(change) * 0.001;
-  volatility *= 0.99;
 }
 
 /* =========================
@@ -151,7 +134,13 @@ function createCandle(){
   let high = Math.max(open, close) + Math.random() * wick;
   let low = Math.min(open, close) - Math.random() * wick;
 
-  candles.push({ open, close, high, low });
+  candles.push({
+    open,
+    close,
+    high,
+    low,
+    volume
+  });
 
   if(candles.length > 200){
     candles.shift();
@@ -165,15 +154,45 @@ function createCandle(){
 }
 
 /* =========================
-   SIMULATION CORE
+   MARKET ANALYSIS ENGINE (FIXED + NOT EMPTY)
 ========================= */
 
-function simulateTick(){
-  createCandle();
+function getMarketAnalysis(){
+
+  let direction =
+    trend > 0.01 ? "Bullish momentum"
+    : trend < -0.01 ? "Bearish pressure"
+    : "Neutral consolidation";
+
+  let volState =
+    volatility > 0.04 ? "High volatility regime"
+    : volatility > 0.02 ? "Moderate volatility"
+    : "Low volatility stability";
+
+  let flowState =
+    buyers > sellers ? "Buy dominance"
+    : "Sell dominance";
+
+  let structure =
+    price > 520 ? "Overextended upside risk"
+    : price < 480 ? "Undervalued zone"
+    : "Fair value zone";
+
+  return {
+    direction,
+    volState,
+    flowState,
+    structure,
+    summary:
+      direction + " with " +
+      volState + " and " +
+      flowState + ". Market in " +
+      structure + "."
+  };
 }
 
 /* =========================
-   DRAW (10 ZONE COLUMN VIEW)
+   DRAW CHART (10 GRID RESTORED)
 ========================= */
 
 function draw(){
@@ -181,23 +200,7 @@ function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   let data = candles.slice(-100);
-
   if(data.length < 10) return;
-
-  /* =========================
-     DIVIDE INTO 10 SECTIONS
-  ========================= */
-
-  let sections = 10;
-  let chunkSize = Math.floor(data.length / sections);
-
-  let sectionData = [];
-
-  for(let i=0;i<sections;i++){
-    sectionData.push(
-      data.slice(i*chunkSize, (i+1)*chunkSize)
-    );
-  }
 
   let rawMin = Math.min(...data.map(c => c.low));
   let rawMax = Math.max(...data.map(c => c.high));
@@ -210,23 +213,25 @@ function draw(){
     return canvas.height - ((p - rawMin) / (rawMax - rawMin)) * canvas.height;
   }
 
+  let spacing = canvas.width / data.length;
+  let width = Math.max(2, spacing * 0.6);
+
   /* =========================
-     GRID LINES (COLUMNS)
+     10 GRID COLUMNS
   ========================= */
 
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  for(let i=0;i<sections;i++){
+  for(let i=0;i<10;i++){
+    let x = (canvas.width/10)*i;
 
-    let x = (canvas.width / sections) * i;
-
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,canvas.height);
     ctx.stroke();
   }
 
   /* =========================
-     PRICE LEVEL GRID
+     PRICE GRID (10/20/30 STYLE)
   ========================= */
 
   ctx.fillStyle = "#aaa";
@@ -234,8 +239,8 @@ function draw(){
 
   for(let val = roundDown(rawMin, step); val <= rawMax; val += step){
 
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.moveTo(0, y(val));
     ctx.lineTo(canvas.width, y(val));
     ctx.stroke();
@@ -244,21 +249,26 @@ function draw(){
   }
 
   /* =========================
-     CANDLES (FILTER SMALL NOISE)
+     PRICE LINE
   ========================= */
 
-  let spacing = canvas.width / data.length;
-  let width = Math.max(2, spacing * 0.6);
+  ctx.strokeStyle = "#4aa3ff";
+  ctx.beginPath();
+  ctx.moveTo(0, y(price));
+  ctx.lineTo(canvas.width, y(price));
+  ctx.stroke();
+
+  /* =========================
+     CANDLES
+  ========================= */
 
   for(let i=0;i<data.length;i++){
 
     let c = data[i];
 
-    /* REMOVE MICRO CANDLES AT BOTTOM */
     if(c.high < rawMin + (rawMax - rawMin)*0.05) continue;
 
     let x = i * spacing;
-
     let color = c.close >= c.open ? "#00c875" : "#ff4d4d";
 
     ctx.strokeStyle = color;
@@ -275,13 +285,13 @@ function draw(){
       x - width/2,
       y(Math.max(c.open, c.close)),
       width,
-      Math.max(1, Math.abs(y(c.open) - y(c.close)))
+      Math.max(1, Math.abs(y(c.open) - c.close))
     );
   }
 }
 
 /* =========================
-   UI
+   UI + ANALYSIS PANEL (FIXED + RICH)
 ========================= */
 
 function updateUI(){
@@ -294,32 +304,26 @@ function updateUI(){
   el("price", price.toFixed(2));
   el("buyers", buyers.toFixed(0));
   el("sellers", sellers.toFixed(0));
+  el("volume", Math.floor(volume));
 
   let explain = document.getElementById("explain");
 
   if(explain){
 
-    let direction =
-      trend > 0.01 ? "Uptrend"
-      : trend < -0.01 ? "Downtrend"
-      : "Sideways";
-
-    let pressure =
-      buyers > sellers ? "Buy pressure"
-      : "Sell pressure";
-
-    let condition =
-      volatility > 0.03 ? "High volatility"
-      : "Stable";
+    let a = getMarketAnalysis();
 
     explain.innerHTML = `
+      Timeframe: ${currentTF}<br>
       Cash: ${state.cash.toFixed(2)}<br>
-      Shares: ${state.shares}<br><br>
+      Shares: ${state.shares}<br>
+      Volume: ${Math.floor(volume)}<br><br>
 
-      Direction: ${direction}<br>
-      Pressure: ${pressure}<br>
-      Condition: ${condition}<br>
-      Volatility: ${volatility.toFixed(3)}
+      Direction: ${a.direction}<br>
+      Volatility: ${a.volState}<br>
+      Flow: ${a.flowState}<br>
+      Structure: ${a.structure}<br><br>
+
+      Summary: ${a.summary}
     `;
   }
 }
@@ -343,15 +347,13 @@ function sell(){
 }
 
 /* =========================
-   MAIN LOOP
+   LOOP
 ========================= */
 
 function tick(){
-  simulateTick();
+  createCandle();
   draw();
   updateUI();
-  saveMarket();
 }
 
-loadMarket();
 setInterval(tick, 500);
